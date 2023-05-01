@@ -40,10 +40,11 @@ void produce (
       cout << "P" << id << ": pushing " << msec << endl;
     }
     
-
-    std::unique_lock<std::mutex> ul(queue_mutex);
-    queue.push(msec);
-    cv.notify_one();
+    {
+      std::unique_lock<std::mutex> ul(queue_mutex);
+      queue.push(msec);
+      cv.notify_one();
+    }
 
     num_produced++;
   }
@@ -57,28 +58,34 @@ void consume (
   std::queue<size_t> & queue,
   std::mutex         & queue_mutex,
   std::condition_variable & cv,
-  size_t Num_to_consume,
+  std::atomic_bool   & done,
   std::atomic_size_t & num_consumed)
 {
-  for (int i = 0; i<Num_to_consume; ++i)
+  while (true)
     {
+      size_t msec = 0;
+      std::unique_lock<std::mutex> ul(queue_mutex);
+      cv.wait(ul, [&](){return (done || queue.size() > 0);});
+
+      if (queue.size() >0)
       {
-        std::unique_lock<std::mutex> ul(queue_mutex);
-        cv.wait(ul);
-        size_t msec = queue.front(); 
+        msec = queue.front(); 
         queue.pop();
-        {
-          lock_guard lg(cout_mutex);
-          cout << "C" << id << ": popped " << msec << endl;
-          cout << "C" << id << ": working..." << endl;
-        }
-        num_consumed++;
+        ul.unlock();
       }
-      
+      else if (done)
+      {
+        ul.unlock();
+        break;
+      }
+        
       {
         lock_guard lg(cout_mutex);
-        //cout << "C" << id << ": waiting..." << endl; // LINE A
+        cout << "C" << id << ": popped " << msec << endl;
+        cout << "C" << id << ": working..." << endl;
       }
+      this_thread::sleep_for(chrono::milliseconds(msec));
+      num_consumed++;
     }
 
   {
@@ -92,7 +99,6 @@ TEST_CASE("producer/consumer example")
   size_t const N_to_produce = 10;
   size_t const N_producers  = 2;
   size_t const N_consumers  = 5;
-  size_t const N_to_consume = (N_to_produce*N_producers)/N_consumers;
 
   std::mutex cout_m;
   std::mutex producer_m;
@@ -103,6 +109,7 @@ TEST_CASE("producer/consumer example")
 
   std::atomic_size_t N_produced = 0;
   std::atomic_size_t N_consumed = 0;
+  std::atomic_bool   done = false;
 
   std::condition_variable cv;
 
@@ -119,7 +126,7 @@ TEST_CASE("producer/consumer example")
       ref(q),
       ref(q_m),
       ref(cv),
-      N_to_consume,
+      ref(done),
       ref(N_consumed)
     );
   }
@@ -147,6 +154,9 @@ TEST_CASE("producer/consumer example")
     t.join();
   }
 
+  unique_lock q_ul(q_m);
+  done = true;
+  q_ul.unlock();
 
   cout << "main: joining consumers" << endl;
   for (auto & t : consumers) {
