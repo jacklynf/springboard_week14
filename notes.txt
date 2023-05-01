@@ -1,0 +1,32 @@
+1. The test is failing because  N_produced is not equal to N_consumed. Running the program multiple times shows that
+   N_produced remains static while N_consumed varies.
+
+2. After looking at the code and noting that N_consumed varies, I suspect the consumer threads are being joined before
+   their work is complete. I think this could have something to do with the done variable. I also see that the queue
+   is constantly being accessed without locks, so there could definitely be a data race happening here.
+
+3. I think the idea here is that when the program reaches done = true, the producers are already done doing their work.
+   This means that no new items are being added to the queue. So, the done variable is operating as the flag for the 
+   consumers to know when they should stop consuming. Ideally, one of the consumer threads would pop an item off the 
+   queue immediately after a producer pushed an item to it, so having main tell the consumers when to finishwould 
+   work - in theory. But we know that threads do not operate so seamlessly, so I assume the consumer threads are
+   not done consuming when the done flag becomes true.
+
+4. Uncommenting line A produces an output when the consumers don't have anything to consume (the queue is empty) but 
+   done == false. 
+
+5. The condition variable should be passed by reference. 
+
+6. Otherwise, we're just creating copies of the variable and there would be no way for the producers and consumers to 
+   access the same memory location to determine who to notify and/or who to be notified by.
+
+7. This doesn't pass the test.
+
+8. This didn't pass because this doesn't fix the issues with the done variable. The done variable is still being
+   set to true when the consumers still have items to process on the queue.
+
+9. My initial thoughts were to get rid of the done variable and I made a jenky workaround to get the code to pass (which
+   basically told each consumer to process a fraction of the number of items being produced). This code did pass, but it 
+   would likely be prone to errors and was not an effective solution. The better solution is to use the done variable, but
+   make sure it is not part of a data race. Also, using a lambda with the condition variable allowed for the consumers to 
+   either do work, exit the function, or do nothing. This was a much more efficient solution (thanks to our Sunday session).
